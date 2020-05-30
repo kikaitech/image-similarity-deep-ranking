@@ -14,14 +14,18 @@ import numpy as np
 import argparse
 import os
 import cv2
+import sys
+import threading
+
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
 # construct the argument parser and parse the arguments
 ap = argparse.ArgumentParser()
 ap.add_argument("-m", "--model", required=True,
                 help="Path to the deep ranking model")
 
-ap.add_argument("-i1", "--image1", required=True,
-                help="Path to the first image")
+# ap.add_argument("-i1", "--image1", required=True,
+#                 help="Path to the first image")
 
 # ap.add_argument("-i2", "--image2", required=True,
 #                 help="Path to the second image")
@@ -32,15 +36,15 @@ if not os.path.exists(args['model']):
     print("The model path doesn't exist!")
     exit()
 
-if not os.path.exists(args['image1']):
-    print("The image 1 path doesn't exist!")
-    exit()
+# if not os.path.exists(args['image1']):
+#     print("The image 1 path doesn't exist!")
+#     exit()
 
 # if not os.path.exists(args['image2']):
 #     print("The image 2 path doesn't exist!")
 #     exit()
 
-args = vars(ap.parse_args())
+# args = vars(ap.parse_args())
 
 
 def convnet_model_():
@@ -93,34 +97,59 @@ model = deep_rank_model()
 #     print (layer.name, layer.output_shape)
 
 model.load_weights(args['model'])
+print('Load model done\nImage paths: ', end='')
 
-image1 = load_img(args['image1'])
-image1 = img_to_array(image1).astype("float64")
-image1 = transform.resize(image1, (224, 224))
-image1 *= 1. / 255
-image1 = np.expand_dims(image1, axis=0)
+stop_threads = False
 
-distance = {}
-arr = []
+def displayImg(path, img, orig):
+    cv2.imshow(path, img)
+    if orig == True:
+        cv2.waitKey(0)
+    else:
+        while(stop_threads == False):
+            cv2.waitKey(33)
 
-embedding1 = model.predict([image1, image1, image1])[0]
-data = np.load('./All.npz')
-x_train, y_train, path = data['arr_0'], data['arr_1'], data['arr_2']
-for i in range(0, len(x_train)):
-    embedding2 = x_train[i]
-    temp = sum([(embedding1[idx] - embedding2[idx]) **
-                2 for idx in range(len(embedding1))])**(0.5)
-    pathImage = path[i]
-    distance[pathImage] = temp
-    arr.append(temp)
+for img_path in sys.stdin:
+    try:
+        img_path = img_path.strip()
+        orig_thread = threading.Thread(target = displayImg, args = (img_path, cv2.imread(img_path), True))
+        orig_thread.start()
 
-arr.sort()
-for key in distance:
-    if abs(distance[key] - arr[0]) < 0.00001 or abs(distance[key] - arr[1]) < 0.00001 or abs(distance[key] - arr[2]) < 0.00001:
-        showimg = cv2.imread(key)
-        print(key)
-        cv2.imshow(key, showimg)
-cv2.waitKey()
+        image1 = load_img(img_path)
+        image1 = img_to_array(image1).astype("float64")
+        image1 = transform.resize(image1, (224, 224))
+        image1 *= 1. / 255
+        image1 = np.expand_dims(image1, axis=0)
+
+        distance = {}
+        arr = []
+
+        embedding1 = model.predict([image1, image1, image1])[0]
+        data = np.load('./All.npz')
+        x_train, y_train, path = data['arr_0'], data['arr_1'], data['arr_2']
+        for i in range(0, len(x_train)):
+            embedding2 = x_train[i]
+            temp = sum([(embedding1[idx] - embedding2[idx]) **
+                        2 for idx in range(len(embedding1))])**(0.5)
+            pathImage = path[i]
+            distance[pathImage] = temp
+            arr.append(temp)
+
+        arr.sort()
+        threads = []
+        stop_threads = False
+        for key in distance:
+            if abs(distance[key] - arr[0]) < 0.00001 or abs(distance[key] - arr[1]) < 0.00001 or abs(distance[key] - arr[2]) < 0.00001:
+                t = threading.Thread(target = displayImg, args = (key, cv2.imread(key), False))
+                threads.append(t)
+                t.start()
+        orig_thread.join()
+        stop_threads = True
+        for t in threads:
+            t.join()
+    except Exception as e:
+        print(e)
+        pass
 
 # bestValue = 9999999.9
 # bestImage = ""
